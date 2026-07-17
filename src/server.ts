@@ -217,6 +217,47 @@ export const createMcpServer = (): McpServer => {
 		async (args: any) => handleSecurityToolCall("security_solve_concolic_gate", args) as any
 	);
 
+	server.registerTool(
+		"security_auto_analyze_apps",
+		{
+			title: "Auto Analyze Android Apps",
+			description: securityToolMetadata("security_auto_analyze_apps").description,
+			inputSchema: {
+				targetPath: z.string().optional().describe("Single APK file, APK directory, package name, or text file containing targets."),
+				targets: z.array(z.string()).optional().describe("APK files, APK directories, package names, or target-list files."),
+				apkPaths: z.array(z.string()).optional().describe("APK files to install and analyze."),
+				apkDirs: z.array(z.string()).optional().describe("Directories of APK files to analyze recursively."),
+				packageName: z.string().optional().describe("Single already installed Android package name."),
+				packageNames: z.array(z.string()).optional().describe("Already installed Android package names."),
+				targetListPath: z.string().optional().describe("Text file containing APK paths, APK directories, or package names."),
+				outputDir: z.string().optional().describe("Directory for reports and artifacts."),
+				fridaRemote: z.string().optional().describe("Remote Frida host:port, e.g. 127.0.0.1:27042 for ADB-forwarded Genymotion."),
+				durationSeconds: z.coerce.number().int().min(1).max(3600).optional().describe("Runtime API/crypto trace duration per app."),
+				nativeProbeDurationSeconds: z.coerce.number().int().min(1).max(3600).optional().describe("Duration per native candidate probe."),
+				nativeProbeLimit: z.coerce.number().int().min(0).max(100).optional().describe("Maximum native candidate symbols to probe per app. Use 0 to disable."),
+				maxSymbolsPerLib: z.coerce.number().int().min(1).max(10000).optional().describe("Maximum scored native symbols retained per library."),
+				inputArgIndex: z.coerce.number().int().min(0).max(15).optional().describe("Native argument index containing the target input pointer."),
+				inputLength: z.coerce.number().int().min(1).max(4096).optional().describe("Symbolic input length for native probes."),
+				adbSerial: z.string().optional().describe("ADB serial/device ID."),
+				installedUserApps: z.boolean().optional().describe("Analyze all third-party packages currently installed on the device."),
+				skipProvision: z.boolean().optional().describe("Skip emulator/proxy provisioning."),
+				skipFrida: z.boolean().optional().describe("Skip frida-server setup."),
+				skipInstall: z.boolean().optional().describe("Do not install APK targets before analysis."),
+				skipRuntime: z.boolean().optional().describe("Only extract native metadata; do not run Frida runtime tracing."),
+				enableSolving: z.boolean().optional().describe("Enable angr solving for native probes when success target data is supplied."),
+				strict: z.boolean().optional().describe("Exit non-zero if any target fails."),
+				successOffset: z.string().optional().describe("Success offset from probed target symbol."),
+				failureOffset: z.string().optional().describe("Failure offset from probed target symbol."),
+				successAddress: z.string().optional().describe("Absolute success address."),
+				failureAddress: z.string().optional().describe("Absolute failure address."),
+			},
+			annotations: {
+				destructiveHint: true,
+			},
+		},
+		async (args: any) => handleSecurityToolCall("security_auto_analyze_apps", args) as any
+	);
+
 	const ensureMobilecliAvailable = (): void => {
 		try {
 			const version = mobilecli.getVersion();

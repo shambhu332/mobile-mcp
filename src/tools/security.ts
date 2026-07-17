@@ -9,6 +9,7 @@ const execFileAsync = promisify(execFile);
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const PROVISION_EMULATOR_SCRIPT = path.join(REPO_ROOT, "ci/provision_emulator.sh");
 const RUN_FRIDA_SCRIPT = path.join(REPO_ROOT, "ci/setup_frida_server.sh");
+const AUTO_ANALYZE_SCRIPT = path.join(REPO_ROOT, "ci/analyze_apps.sh");
 const ORCHESTRATOR_PY = path.join(REPO_ROOT, "concolic_engine/orchestrator.py");
 const PYTHON_BIN = process.env.PYTHON || "python3";
 const EXEC_OPTIONS = {
@@ -51,6 +52,43 @@ export const SECURITY_TOOLS = [
 			},
 			required: ["packageName"]
 		}
+	},
+	{
+		name: "security_auto_analyze_apps",
+		description: "End-to-end Android security automation for APK paths, APK directories, package names, target lists, or all installed user apps. Provisions proxy trust, starts Frida, installs APKs, extracts native libraries, discovers candidate symbols, captures runtime telemetry, and writes reports.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				targetPath: { type: "string", description: "Single APK file, APK directory, package name, or text file containing targets." },
+				targets: { type: "array", items: { type: "string" }, description: "APK files, APK directories, package names, or target-list files." },
+				apkPaths: { type: "array", items: { type: "string" }, description: "APK files to install and analyze." },
+				apkDirs: { type: "array", items: { type: "string" }, description: "Directories of APK files to analyze recursively." },
+				packageName: { type: "string", description: "Single already installed Android package name." },
+				packageNames: { type: "array", items: { type: "string" }, description: "Already installed Android package names." },
+				targetListPath: { type: "string", description: "Text file containing APK paths, APK directories, or package names." },
+				outputDir: { type: "string", description: "Directory for reports and artifacts." },
+				fridaRemote: { type: "string", description: "Remote Frida host:port, e.g. 127.0.0.1:27042." },
+				durationSeconds: { type: "number", description: "Runtime API/crypto trace duration per app." },
+				nativeProbeDurationSeconds: { type: "number", description: "Duration per native candidate probe." },
+				nativeProbeLimit: { type: "number", description: "Maximum native candidate symbols to probe per app. Use 0 to disable." },
+				maxSymbolsPerLib: { type: "number", description: "Maximum scored native symbols retained per library." },
+				inputArgIndex: { type: "number", description: "Native argument index containing the target input pointer." },
+				inputLength: { type: "number", description: "Symbolic input length for native probes." },
+				adbSerial: { type: "string", description: "ADB serial/device ID." },
+				installedUserApps: { type: "boolean", description: "Analyze all third-party packages currently installed on the device." },
+				skipProvision: { type: "boolean", description: "Skip emulator/proxy provisioning." },
+				skipFrida: { type: "boolean", description: "Skip frida-server setup." },
+				skipInstall: { type: "boolean", description: "Do not install APK targets before analysis." },
+				skipRuntime: { type: "boolean", description: "Only extract native metadata; do not run Frida runtime tracing." },
+				enableSolving: { type: "boolean", description: "Enable angr solving for native probes when success target data is supplied." },
+				strict: { type: "boolean", description: "Exit non-zero if any target fails." },
+				successOffset: { type: "string", description: "Success offset from probed target symbol." },
+				failureOffset: { type: "string", description: "Failure offset from probed target symbol." },
+				successAddress: { type: "string", description: "Absolute success address." },
+				failureAddress: { type: "string", description: "Absolute failure address." },
+			},
+			required: []
+		}
 	}
 ];
 
@@ -63,6 +101,24 @@ function appendOptionalString(args: string[], flag: string, value: unknown): voi
 function appendOptionalNumber(args: string[], flag: string, value: unknown): void {
 	if (typeof value === "number" && Number.isFinite(value)) {
 		args.push(flag, String(value));
+	}
+}
+
+function appendOptionalBoolean(args: string[], flag: string, value: unknown): void {
+	if (value === true) {
+		args.push(flag);
+	}
+}
+
+function appendRepeatedString(args: string[], flag: string, values: unknown): void {
+	if (!Array.isArray(values)) {
+		return;
+	}
+
+	for (const value of values) {
+		if (typeof value === "string" && value.trim() !== "") {
+			args.push(flag, value.trim());
+		}
 	}
 }
 
@@ -98,6 +154,79 @@ function buildConcolicArgs(toolArgs: any): string[] {
 	return args;
 }
 
+function buildAutoAnalyzeArgs(toolArgs: any): string[] {
+	const args: string[] = [];
+	const positionalTargets: string[] = [];
+
+	appendOptionalString(args, "--target-list", toolArgs.targetListPath);
+	appendOptionalString(args, "--output-dir", toolArgs.outputDir);
+	appendOptionalString(args, "--frida-remote", toolArgs.fridaRemote);
+	appendOptionalString(args, "--success-offset", toolArgs.successOffset);
+	appendOptionalString(args, "--failure-offset", toolArgs.failureOffset);
+	appendOptionalString(args, "--success-address", toolArgs.successAddress);
+	appendOptionalString(args, "--failure-address", toolArgs.failureAddress);
+	appendOptionalString(args, "--adb-serial", toolArgs.adbSerial);
+	appendOptionalNumber(args, "--duration", toolArgs.durationSeconds);
+	appendOptionalNumber(args, "--native-probe-duration", toolArgs.nativeProbeDurationSeconds);
+	appendOptionalNumber(args, "--native-probe-limit", toolArgs.nativeProbeLimit);
+	appendOptionalNumber(args, "--max-symbols-per-lib", toolArgs.maxSymbolsPerLib);
+	appendOptionalNumber(args, "--input-arg-index", toolArgs.inputArgIndex);
+	appendOptionalNumber(args, "--length", toolArgs.inputLength);
+	appendOptionalBoolean(args, "--installed-user-apps", toolArgs.installedUserApps);
+	appendOptionalBoolean(args, "--skip-provision", toolArgs.skipProvision);
+	appendOptionalBoolean(args, "--skip-frida", toolArgs.skipFrida);
+	appendOptionalBoolean(args, "--skip-install", toolArgs.skipInstall);
+	appendOptionalBoolean(args, "--skip-runtime", toolArgs.skipRuntime);
+	appendOptionalBoolean(args, "--enable-solving", toolArgs.enableSolving);
+	appendOptionalBoolean(args, "--strict", toolArgs.strict);
+
+	if (typeof toolArgs.packageName === "string" && toolArgs.packageName.trim() !== "") {
+		const packageName = toolArgs.packageName.trim();
+		validatePackageName(packageName);
+		args.push("--package", packageName);
+	}
+
+	if (Array.isArray(toolArgs.packageNames)) {
+		for (const value of toolArgs.packageNames) {
+			if (typeof value === "string" && value.trim() !== "") {
+				const packageName = value.trim();
+				validatePackageName(packageName);
+				args.push("--package", packageName);
+			}
+		}
+	}
+
+	if (typeof toolArgs.targetPath === "string" && toolArgs.targetPath.trim() !== "") {
+		positionalTargets.push(toolArgs.targetPath.trim());
+	}
+
+	if (Array.isArray(toolArgs.targets)) {
+		for (const value of toolArgs.targets) {
+			if (typeof value === "string" && value.trim() !== "") {
+				positionalTargets.push(value.trim());
+			}
+		}
+	}
+
+	appendRepeatedString(args, "--apk", toolArgs.apkPaths);
+	appendRepeatedString(args, "--apk-dir", toolArgs.apkDirs);
+	args.push(...positionalTargets);
+
+	if (
+		positionalTargets.length === 0 &&
+		!toolArgs.targetListPath &&
+		!toolArgs.packageName &&
+		!(Array.isArray(toolArgs.packageNames) && toolArgs.packageNames.length > 0) &&
+		!(Array.isArray(toolArgs.apkPaths) && toolArgs.apkPaths.length > 0) &&
+		!(Array.isArray(toolArgs.apkDirs) && toolArgs.apkDirs.length > 0) &&
+		toolArgs.installedUserApps !== true
+	) {
+		throw new Error("Provide targetPath, targets, packageName, packageNames, targetListPath, or installedUserApps.");
+	}
+
+	return args;
+}
+
 export async function handleSecurityToolCall(name: string, args: any) {
 	switch (name) {
 		case "security_provision_emulator": {
@@ -126,6 +255,16 @@ export async function handleSecurityToolCall(name: string, args: any) {
 				return { content: [{ type: "text", text: `Runtime analysis finished.\n${output}` }] };
 			} catch (err: any) {
 				return { isError: true, content: [{ type: "text", text: `Runtime analysis failed: ${err.message}` }] };
+			}
+		}
+		case "security_auto_analyze_apps": {
+			try {
+				const autoAnalyzeArgs = buildAutoAnalyzeArgs(args);
+				console.error(`[*] Running end-to-end mobile security automation`);
+				const output = await runCommand("bash", [AUTO_ANALYZE_SCRIPT, ...autoAnalyzeArgs]);
+				return { content: [{ type: "text", text: `Automation finished.\n${output}` }] };
+			} catch (err: any) {
+				return { isError: true, content: [{ type: "text", text: `Automation failed: ${err.message}` }] };
 			}
 		}
 		default:
