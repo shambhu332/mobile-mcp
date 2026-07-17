@@ -20,9 +20,11 @@
     "clean": "rm -rf lib",
     "prepare": "husky"
   },
-  "files": [
-    "lib"
-  ],
+	"files": [
+		"lib",
+		"ci",
+		"concolic_engine"
+	],
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.26.0",
     "ajv": "^8.18.0",

@@ -163,6 +163,19 @@ export const createMcpServer = (): McpServer => {
 	};
 
 	server.registerTool(
+		"security_provision_emulator",
+		{
+			title: "Provision Genymotion Emulator",
+			description: securityToolMetadata("security_provision_emulator").description,
+			inputSchema: {},
+			annotations: {
+				destructiveHint: true,
+			},
+		},
+		async (args: any) => handleSecurityToolCall("security_provision_emulator", args) as any
+	);
+
+	server.registerTool(
 		"security_setup_frida_environment",
 		{
 			title: "Setup Frida Environment",
@@ -182,6 +195,20 @@ export const createMcpServer = (): McpServer => {
 			description: securityToolMetadata("security_solve_concolic_gate").description,
 			inputSchema: {
 				packageName: z.string().describe("Target Android package name."),
+				nativeLibraryPath: z.string().optional().describe("Local native library path for angr. If omitted, runtime API and crypto telemetry still runs but symbolic solving is skipped."),
+				targetSo: z.string().optional().describe("Loaded native library name to instrument. Defaults to libnative-lib.so."),
+				targetSymbol: z.string().optional().describe("Exported native function symbol to intercept."),
+				successOffset: z.string().optional().describe("Success offset from target symbol, e.g. 0x14C2."),
+				failureOffset: z.string().optional().describe("Failure offset from target symbol, e.g. 0x14F0."),
+				inputArgIndex: z.coerce.number().int().min(0).max(15).optional().describe("Native function argument index containing the symbolic input pointer."),
+				inputLength: z.coerce.number().int().min(1).max(4096).optional().describe("Symbolic input length in bytes."),
+				eventLogPath: z.string().optional().describe("JSONL output path for runtime telemetry."),
+				fridaRemote: z.string().optional().describe("Remote Frida host:port, e.g. 127.0.0.1:27042 for ADB-forwarded Genymotion."),
+				durationSeconds: z.coerce.number().int().min(1).max(3600).optional().describe("Run instrumentation for N seconds, then detach."),
+				solveTimeoutSeconds: z.coerce.number().int().min(1).max(600).optional().describe("Maximum seconds per symbolic solve."),
+				maxSteps: z.coerce.number().int().min(1).max(100000).optional().describe("Maximum angr steps per solve."),
+				maxActive: z.coerce.number().int().min(1).max(4096).optional().describe("Maximum active states retained per step."),
+				disableSolving: z.boolean().optional().describe("Collect API, crypto, and network telemetry without invoking angr."),
 			},
 			annotations: {
 				destructiveHint: true,

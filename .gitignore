@@ -1,5 +1,8 @@
 **/.DS_Store
 node_modules
+.venv
+__pycache__
+**/__pycache__
 lib
 .vscode
 coverage

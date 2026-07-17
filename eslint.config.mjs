@@ -153,6 +153,15 @@ const languageOptions = {
 
 export default [
 	{
+		ignores: [
+			".venv/**",
+			"lib/**",
+			"coverage/**",
+			"test-results/**",
+			"playwright-report/**",
+		],
+	},
+	{
 		files: ["**/*.ts"],
 		plugins,
 		languageOptions,
