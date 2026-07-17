@@ -15,6 +15,7 @@ import { isScalingAvailable, Image } from "./image-utils";
 import { Mobilecli } from "./mobilecli";
 import { MobileDevice } from "./mobile-device";
 import { validateOutputPath, validateFileExtension } from "./utils";
+import { SECURITY_TOOLS, handleSecurityToolCall } from "./tools/security.js";
 
 const ALLOWED_SCREENSHOT_EXTENSIONS = [".png", ".jpg", ".jpeg"];
 const ALLOWED_RECORDING_EXTENSIONS = [".mp4"];
@@ -151,6 +152,43 @@ export const createMcpServer = (): McpServer => {
 	const activeRecordings = new Map<string, ActiveRecording>();
 	const agentVerifiedSimulators = new Set<string>();
 	posthog("launch", {}).then();
+
+	const securityToolMetadata = (name: string) => {
+		const metadata = SECURITY_TOOLS.find(tool => tool.name === name);
+		if (!metadata) {
+			throw new Error(`Security tool ${name} is not defined.`);
+		}
+
+		return metadata;
+	};
+
+	server.registerTool(
+		"security_setup_frida_environment",
+		{
+			title: "Setup Frida Environment",
+			description: securityToolMetadata("security_setup_frida_environment").description,
+			inputSchema: {},
+			annotations: {
+				destructiveHint: true,
+			},
+		},
+		async (args: any) => handleSecurityToolCall("security_setup_frida_environment", args) as any
+	);
+
+	server.registerTool(
+		"security_solve_concolic_gate",
+		{
+			title: "Solve Concolic Gate",
+			description: securityToolMetadata("security_solve_concolic_gate").description,
+			inputSchema: {
+				packageName: z.string().describe("Target Android package name."),
+			},
+			annotations: {
+				destructiveHint: true,
+			},
+		},
+		async (args: any) => handleSecurityToolCall("security_solve_concolic_gate", args) as any
+	);
 
 	const ensureMobilecliAvailable = (): void => {
 		try {

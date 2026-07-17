@@ -80,12 +80,19 @@ const startStdioServer = async () => {
 		// (including NODE_V8_COVERAGE output). Node's default SIGINT/SIGTERM
 		// handling terminates the process without writing the coverage file,
 		// which makes the `test:mcp` report come back all zeros.
+		const keepAlive = setInterval(() => {
+			// Keep stdio MCP alive in non-interactive clients where stdin alone may not hold the event loop.
+		}, 60 * 60 * 1000);
+
 		const shutdown = () => {
+			clearInterval(keepAlive);
 			process.exit(0);
 		};
 
 		process.on("SIGINT", shutdown);
 		process.on("SIGTERM", shutdown);
+		process.stdin.resume();
+		process.stdin.on("end", shutdown);
 
 		error("mobile-mcp server running on stdio");
 	} catch (err: any) {

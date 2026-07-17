@@ -1,0 +1,87 @@
+# .github/workflows/runtime-security.yml
+name: Dynamic Concolic Runtime Integration Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  concolic-runtime-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        api-level: [31]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python Runtime Environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Analysis Dependencies
+        run: pip install frida-tools angr
+
+      - name: Setup JDK Environment
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Enable KVM Virtualization Permissions
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Set up AVD caches for emulator config files and ADB
+      - name: Restore AVD Emulator Caches
+        uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-${{ matrix.api-level }}-x86_64-v1
+
+      # Cold Boot (Runs ONLY on Cache Miss to establish baseline snapshot file)
+      - name: Initialize Baseline Snapshot (Cold Boot)
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: false
+          script: echo "[*] Baseline emulator snapshot initialized and cached."
+
+      # Warm Boot (Loads the saved baseline snapshot instantly without writing back runtime changes)
+      - name: Execute Runtime Audit Suite (Warm Boot)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            adb wait-for-device
+            
+            # Assemble Android Debug Binary
+            ./gradlew assembleDebug
+            
+            # Provision and run security audit
+            chmod +x ci/setup_frida_server.sh
+            ./ci/setup_frida_server.sh
+            adb install app/build/outputs/apk/debug/app-debug.apk
+            
+            # Run test suite
+            python ci/run_pipeline_hooks.py
